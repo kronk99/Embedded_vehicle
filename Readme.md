@@ -1,5 +1,5 @@
 
-# Proyect #1 : Custom car embedded Ssystem
+# Proyect #1 : Custom car embedded System
 **Course:** Embedded Systems  
 **Students:**  
 - Mariana Rojas Rojas  
