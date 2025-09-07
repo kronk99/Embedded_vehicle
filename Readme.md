@@ -72,4 +72,3 @@ This project involves a custom-built embedded system designed for an intelligent
 
 ---
 
-¡Gracias por utilizar nuestro simulador MP con Interconnect 🚀!
