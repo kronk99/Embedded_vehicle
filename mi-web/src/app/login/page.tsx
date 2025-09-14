@@ -1,5 +1,4 @@
 "use client";
-// app/login/page.tsx
 import { useState } from "react";
 import Link from "next/link";
 
@@ -8,16 +7,31 @@ export default function LoginPage() {
   const [pass, setPass] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
 
-  const onSubmit = (e: React.FormEvent) => {
+  const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setMsg(null);
+
     if (!usuario || !pass) {
       setMsg("Ingresa usuario y contraseña.");
       return;
     }
-    // Aquí iría tu llamada a API/acción del servidor
-    console.log({ usuario, pass });
-    setMsg("Login enviado (demo).");
+
+    try {
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ usuario, pass }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMsg(data.error || "Credenciales inválidas.");
+        return;
+      }
+      localStorage.setItem("username", usuario);
+      window.location.href = "/drive";
+    } catch (err: any) {
+      setMsg("Error de red/servidor.");
+    }
   };
 
   return (

@@ -1,5 +1,4 @@
 "use client";
-// app/register/page.tsx
 import { useState } from "react";
 import Link from "next/link";
 
@@ -8,24 +7,40 @@ export default function RegisterPage() {
   const [usuario, setUsuario] = useState("");
   const [pass, setPass] = useState("");
   const [pass2, setPass2] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [ok, setOk] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
 
-  const onSubmit = (e: React.FormEvent) => {
+  const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setOk(null);
-    setError(null);
+    setMsg(null);
+
     if (!nombre || !usuario || !pass || !pass2) {
-      setError("Completa todos los campos.");
+      setMsg("Completa todos los campos.");
       return;
     }
     if (pass !== pass2) {
-      setError("Las contraseñas no coinciden.");
+      setMsg("Las contraseñas no coinciden.");
       return;
     }
-    // Aquí iría tu llamada a API/acción del servidor
-    console.log({ nombre, usuario, pass });
-    setOk("Usuario registrado (demo).");
+
+    try {
+      const res = await fetch("/api/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nombre, usuario, pass }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMsg(data.error || "Error al registrar.");
+        return;
+      }
+      setMsg("Usuario registrado (hash guardado en archivo).");
+      setNombre("");
+      setUsuario("");
+      setPass("");
+      setPass2("");
+    } catch (err: any) {
+      setMsg("Error de red/servidor.");
+    }
   };
 
   return (
@@ -71,8 +86,7 @@ export default function RegisterPage() {
           />
         </div>
 
-        {error && <p className="text-red-600 text-sm">{error}</p>}
-        {ok && <p className="text-green-700 text-sm">{ok}</p>}
+        {msg && <p className="text-sm">{msg}</p>}
 
         <button
           type="submit"
