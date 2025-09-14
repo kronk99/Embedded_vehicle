@@ -25,8 +25,8 @@
 
 #define POLL_TIMEOUT        10*1000
 /*definicion de funciones para la api*/
+static int file_open_and_write_value(const char *fname, const char *wdata);
 int gpio_export(int pin);
 int gpio_unexport(int pin);
-int gpio_set_dir(int pin, int is_output);
-int gpio_write(int pin, int value); // 0/1
-int gpio_read(int pin); 
+int gpio_set_dir(int gpio_num, const char* dir);
+int gpio_set_value(int gpio_num, const char *value);
