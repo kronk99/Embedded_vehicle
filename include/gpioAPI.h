@@ -30,3 +30,6 @@ int gpio_export(int pin);
 int gpio_unexport(int pin);
 int gpio_set_dir(int gpio_num, const char* dir);
 int gpio_set_value(int gpio_num, const char *value);
+/*alias para los ejemplos*/
+#define gpio_set_direction gpio_set_dir
+#define gpio_get_fd_to_value gpio_read
