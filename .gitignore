@@ -1,0 +1,7 @@
+/build/cache
+/build/downloads
+/build/sstate-cache
+/build/tmp
+/build/tmp-glibc
+/build/bitbake-cookerdaemon.log
+
