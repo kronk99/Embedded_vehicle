@@ -1,0 +1,30 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          connect-wifi
+# Required-Start:    $network
+# Required-Stop:     
+# Default-Start:     2 3 4 5
+# Default-Stop:      
+# Short-Description: Auto Wi-Fi connection
+### END INIT INFO
+
+case "$1" in
+  start)
+    echo "Starting Wi-Fi connection..."
+    /usr/bin/python3 /usr/bin/connection.py &
+    ;;
+  stop)
+    echo "Stopping Wi-Fi connection..."
+    killall -q connection.py
+    ;;
+  restart)
+    $0 stop
+    $0 start
+    ;;
+  *)
+    echo "Usage: /etc/init.d/connect-wifi {start|stop|restart}"
+    exit 1
+    ;;
+esac
+
+exit 0

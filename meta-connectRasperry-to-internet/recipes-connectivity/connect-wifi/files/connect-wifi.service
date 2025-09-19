@@ -1,0 +1,16 @@
+[Unit]
+Description=Auto-connect Raspberry Pi to Wi-Fi
+After=network-pre.target
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/bin/connection.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+
