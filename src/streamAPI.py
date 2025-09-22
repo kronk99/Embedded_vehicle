@@ -27,6 +27,9 @@ def index():
 @app.route('/video_feed')
 def video_feed():
     return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+#para pruebas, eliminar despues
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
 
 
     
