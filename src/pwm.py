@@ -1,5 +1,75 @@
-#BIBLIOTECA DEL GPIO #18 PARA PWM DE HARDWARE , OTROS PINES SON PWM POR SOFTWARE Ajustando tiempos en la CPU o usando temporizadores
-#FUNCIONES A CREAR : pwm_init(pin), pwm_set_duty(pin, valor), pwm_start(pin), pwm_stop(pin)
+
+import os
+PWM_CHIP_PATH = "/sys/class/pwm/pwmchip0"
+PWM_EXPORT = os.path.join(PWM_CHIP_PATH, "export")
+PWM_UNEXPORT = os.path.join(PWM_CHIP_PATH, "unexport")
+PWM_CHANNEL = "pwm0"
+
+#funcion que inicializa el pwm
+def pwm_init(pin):
+    if pin != 18:
+        return {"error": "Solo GPIO18 soporta PWM hardware con sysfs en pwmchip0/pwm0"}, 400
+
+    if not os.path.exists(os.path.join(PWM_CHIP_PATH, PWM_CHANNEL)):
+        with open(PWM_EXPORT, "w") as f:
+            f.write("0")
+    with open(os.path.join(PWM_CHIP_PATH, PWM_CHANNEL, "period"), "w") as f:
+        f.write("20000000")  # período 20ms
+    with open(os.path.join(PWM_CHIP_PATH, PWM_CHANNEL, "duty_cycle"), "w") as f:
+        f.write("0")
+    return {"message": f"PWM inicializado en pin {pin}"}, 200
+
+def pwm_set_duty(pin, valor):
+    if pin != 18:
+        return {"error": "Solo GPIO18 soporta PWM hardware"}, 400
+    period_path = os.path.join(PWM_CHIP_PATH, PWM_CHANNEL, "period")
+    duty_path = os.path.join(PWM_CHIP_PATH, PWM_CHANNEL, "duty_cycle")
+    try:
+        with open(period_path, "r") as f:
+            period = int(f.read().strip())
+        duty = int((valor / 100.0) * period)
+        with open(duty_path, "w") as f:
+            f.write(str(duty))
+        return {"message": f"Duty cycle establecido a {valor}%"}, 200
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+
+def pwm_start(pin):
+    if pin != 18:
+        return {"error": "Solo GPIO18 soporta PWM hardware"}, 400
+    enable_path = os.path.join(PWM_CHIP_PATH, PWM_CHANNEL, "enable")
+    with open(enable_path, "w") as f:
+        f.write("1")
+    return {"message": f"PWM iniciado en pin {pin}"}, 200
+
+
+def pwm_stop(pin):
+    if pin != 18:
+        return {"error": "Solo GPIO18 soporta PWM hardware"}, 400
+    enable_path = os.path.join(PWM_CHIP_PATH, PWM_CHANNEL, "enable")
+    with open(enable_path, "w") as f:
+        f.write("0")
+    return {"message": f"PWM detenido en pin {pin}"}, 200
+
+
+
+
+
+
+"""
+# Ejemplo uso
+if __name__ == "__main__":
+    CON FLASK DEBO DE LLAMAR A CADA UNO DE DICHOS METODOS
+    pin = 18
+    pwm_init(pin)
+    pwm_set_duty(pin, 50)  # 50% duty cycle
+    pwm_start(pin)
+    input("Presiona Enter para detener PWM...")
+    pwm_stop(pin)
+PRINCIPALES FUNCIONES :
+
+
 with open("/sys/class/pwm/pwmchip0/export", "w") as f:
     f.write("0")
 
@@ -12,7 +82,7 @@ with open("/sys/class/pwm/pwmchip0/pwm0/duty_cycle", "w") as f:
 with open("/sys/class/pwm/pwmchip0/pwm0/enable", "w") as f:
     f.write("1")
 
-
+IMPORTANTE CONFIGURAR !!!!!!!!!!!!!!!
 
 comandos: 
 sudo nano /boot/firmware/config.txt
@@ -48,7 +118,7 @@ echo 1500000  | sudo tee duty_cycle     # pulso 1.5 ms = posición centro
 echo 1        | sudo tee enable
 
 
-👉 Para mover el servo:
+ Para mover el servo:
 
 1000000 → ~0° (1 ms)
 
@@ -60,3 +130,4 @@ echo 1        | sudo tee enable
 Cuando quieras apagarlo:
 
 echo 0 | sudo tee enable
+"""
