@@ -1,5 +1,4 @@
-// app/drive/page.tsx
-// app/drive/page.tsx
+// src/app/drive/page.tsx
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
@@ -7,9 +6,38 @@ import { useEffect, useState, useCallback, useRef } from "react";
 type Pressed = {
   w: boolean;
   a: boolean;
-  s: boolean; // retroceso
+  s: boolean; // reverse
   d: boolean;
 };
+
+// URLs de tus Flask
+const CONTROLS_URL = "http://localhost:5001"; // control_server.py
+const STREAM_URL = "http://localhost:5002";   // stream_server.py
+
+async function postEvent(topic: string, payload: any) {
+  try {
+    await fetch(`${CONTROLS_URL}/event`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic, payload }),
+      keepalive: true,
+    });
+  } catch {
+    // opcional: console.warn("No se pudo enviar evento", e);
+  }
+}
+
+// Mapeo de dirección según tu definición:
+// A = derecha, W = frente, D = izquierda, S = reversa
+function keyToDir(k: keyof Pressed) {
+  switch (k) {
+    case "w": return "forward";
+    case "s": return "reverse";
+    case "a": return "right";
+    case "d": return "left";
+    default: return "";
+  }
+}
 
 export default function DrivePage() {
   const [username, setUsername] = useState<string>("");
@@ -24,7 +52,7 @@ export default function DrivePage() {
   const [leftBlinker, setLeftBlinker] = useState<boolean>(false);
   const [rightBlinker, setRightBlinker] = useState<boolean>(false);
 
-  // STREAM placeholder + captura
+  // canvas del stream
   const streamCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Distancia de retroceso (0..5) donde 5 = muy cerca del choque
@@ -36,9 +64,14 @@ export default function DrivePage() {
     if (u) setUsername(u);
   }, []);
 
-  // Helpers teclas
+  // === CAMBIO CLAVE: setKey ahora envía SOLO la tecla que cambió ===
   const setKey = useCallback((key: keyof Pressed, val: boolean) => {
-    setPressed((p) => (p[key] === val ? p : { ...p, [key]: val }));
+    setPressed((p) => {
+      if (p[key] === val) return p;
+      return { ...p, [key]: val };
+    });
+    // Enviar solo el evento de esta tecla con tu mapeo de dirección
+    postEvent("movement", { key, state: val ? "down" : "up", dir: keyToDir(key) });
   }, []);
 
   // Handlers de direccionales (exclusivos)
@@ -60,22 +93,23 @@ export default function DrivePage() {
   // Teclado global: WASD + FLECHAS (← →)
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      const k = e.key.toLowerCase();
+      const raw = e.key;
+      const k = raw.length === 1 ? raw.toLowerCase() : raw.toLowerCase();
 
-      // Evita auto-repetición para los toggles de direccionales
-      if (e.repeat) {
-        // Para WASD sí queremos sostener, así que solo filtramos repeat de flechas
-        if (k === "arrowleft" || k === "arrowright") return;
-      }
+      // Evita auto-repetición para toggles de direccionales
+      if (e.repeat && (k === "arrowleft" || k === "arrowright")) return;
 
       if (k === "arrowleft") {
         e.preventDefault();
         toggleLeftBlinker();
+        // reporta estado actual de blinkers
+        postEvent("blinkers", { left: !leftBlinker, right: false });
         return;
       }
       if (k === "arrowright") {
         e.preventDefault();
         toggleRightBlinker();
+        postEvent("blinkers", { left: false, right: !rightBlinker });
         return;
       }
 
@@ -84,37 +118,44 @@ export default function DrivePage() {
         setKey(k as keyof Pressed, true);
       }
     };
-
     const up = (e: KeyboardEvent) => {
-      const k = e.key.toLowerCase();
-      // Direccionales son toggle → no hacemos nada en keyup para flechas
-
+      const raw = e.key;
+      const k = raw.length === 1 ? raw.toLowerCase() : raw.toLowerCase();
+      // Flechas son toggle → no hacemos nada en keyup
       if (k === "w" || k === "a" || k === "s" || k === "d") {
         e.preventDefault();
         setKey(k as keyof Pressed, false);
       }
     };
-
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     return () => {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
     };
-  }, [setKey, toggleLeftBlinker, toggleRightBlinker]);
-
-  // 🔁 LOG opcional
-  useEffect(() => {
-    // console.log("pressed", pressed, "rearLights", rearLights, "frontLights", frontLights, "speed", speed, "blinkers", {leftBlinker, rightBlinker});
-  }, [pressed, rearLights, frontLights, speed, leftBlinker, rightBlinker]);
+  }, [setKey, toggleLeftBlinker, toggleRightBlinker, leftBlinker, rightBlinker]);
 
   // Auto luces traseras en reversa (S)
   useEffect(() => {
     setRearLights(pressed.s);
   }, [pressed.s]);
 
-  // Dibujo placeholder del stream
+  // Reportar cambios de luces / direccionales / velocidad (estos sí son independientes)
   useEffect(() => {
+    postEvent("lights", { rear: rearLights, front: frontLights });
+  }, [rearLights, frontLights]);
+
+  useEffect(() => {
+    postEvent("blinkers", { left: leftBlinker, right: rightBlinker });
+  }, [leftBlinker, rightBlinker]);
+
+  useEffect(() => {
+    postEvent("speed", { value: speed });
+  }, [speed]);
+
+  // === Dibujar frames del Flask de stream en el canvas ===
+  useEffect(() => {
+    let cancelled = false;
     const canvas = streamCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -123,64 +164,39 @@ export default function DrivePage() {
     const W = canvas.width;
     const H = canvas.height;
 
-    ctx.fillStyle = "#111827";
-    ctx.fillRect(0, 0, W, H);
-    ctx.strokeStyle = "#374151";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(1, 1, W - 2, H - 2);
+    const drawLoop = async () => {
+      while (!cancelled) {
+        try {
+          const img = new Image();
+          img.crossOrigin = "anonymous";
+          img.src = `${STREAM_URL}/frame.jpg?t=${Date.now()}`; // evita cache
 
-    ctx.fillStyle = "#D1D5DB";
-    ctx.font = "16px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif";
-    ctx.fillText("STREAM (placeholder)", 12, 24);
+          await new Promise<void>((resolve, reject) => {
+            img.onload = () => resolve();
+            img.onerror = reject;
+          });
 
-    const t = Date.now() / 500;
-    const cx = W / 2 + Math.sin(t) * 40;
-    const cy = H / 2 + Math.cos(t) * 20;
-
-    ctx.fillStyle = "#10B981";
-    ctx.beginPath();
-    ctx.arc(cx, cy, 12, 0, Math.PI * 2);
-    ctx.fill();
-
-    const id = setTimeout(() => {
-      if (streamCanvasRef.current) {
-        streamCanvasRef.current.dispatchEvent(new Event("repaint"));
+          // Mantener aspect-ratio centrado
+          ctx.clearRect(0, 0, W, H);
+          const iw = img.width;
+          const ih = img.height;
+          const scale = Math.min(W / iw, H / ih);
+          const dw = iw * scale;
+          const dh = ih * scale;
+          const dx = (W - dw) / 2;
+          const dy = (H - dh) / 2;
+          ctx.drawImage(img, dx, dy, dw, dh);
+        } catch {
+          await new Promise((r) => setTimeout(r, 200));
+        }
+        await new Promise((r) => setTimeout(r, 140)); // ~7 fps
       }
-    }, 300);
-
-    return () => clearTimeout(id);
-  }, []);
-
-  useEffect(() => {
-    const canvas = streamCanvasRef.current;
-    if (!canvas) return;
-    const handler = () => {
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      const W = canvas.width;
-      const H = canvas.height;
-
-      ctx.fillStyle = "#111827";
-      ctx.fillRect(0, 0, W, H);
-      ctx.strokeStyle = "#374151";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(1, 1, W - 2, H - 2);
-
-      ctx.fillStyle = "#D1D5DB";
-      ctx.font = "16px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif";
-      ctx.fillText("STREAM (placeholder)", 12, 24);
-
-      const t = Date.now() / 500;
-      const cx = W / 2 + Math.sin(t) * 40;
-      const cy = H / 2 + Math.cos(t) * 20;
-
-      ctx.fillStyle = "#10B981";
-      ctx.beginPath();
-      ctx.arc(cx, cy, 12, 0, Math.PI * 2);
-      ctx.fill();
     };
-    canvas.addEventListener("repaint", handler);
-    return () => canvas.removeEventListener("repaint", handler);
+
+    drawLoop();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Captura foto del canvas
@@ -253,7 +269,7 @@ export default function DrivePage() {
         <aside className="bg-white rounded-2xl shadow p-4 h-fit sticky top-20">
           <h2 className="text-base font-semibold mb-3">Controles</h2>
           <p className="text-sm text-gray-600 mb-3">
-            Usa el <b>mouse</b> manteniendo presionado o el <b>teclado</b> (W/A/S/D).  
+            Usa el <b>mouse</b> manteniendo presionado o el <b>teclado</b> (W/A/S/D).{" "}
             Direccionales: teclas <b>←</b> y <b>→</b>.
           </p>
 
@@ -266,6 +282,7 @@ export default function DrivePage() {
               onMouseUp={() => setKey("w", false)}
               onMouseLeave={() => setKey("w", false)}
               aria-pressed={pressed.w}
+              title="W = forward"
             >
               W
             </button>
@@ -277,6 +294,7 @@ export default function DrivePage() {
               onMouseUp={() => setKey("a", false)}
               onMouseLeave={() => setKey("a", false)}
               aria-pressed={pressed.a}
+              title="A = right"
             >
               A
             </button>
@@ -289,6 +307,7 @@ export default function DrivePage() {
               onMouseUp={() => setKey("d", false)}
               onMouseLeave={() => setKey("d", false)}
               aria-pressed={pressed.d}
+              title="D = left"
             >
               D
             </button>
@@ -300,6 +319,7 @@ export default function DrivePage() {
               onMouseUp={() => setKey("s", false)}
               onMouseLeave={() => setKey("s", false)}
               aria-pressed={pressed.s}
+              title="S = reverse"
             >
               S
             </button>
@@ -310,7 +330,7 @@ export default function DrivePage() {
           <div className="flex items-center justify-center gap-4 mb-4">
             <button
               className={blinkerBtnClass(leftBlinker)}
-              onClick={toggleLeftBlinker}
+              onClick={() => { toggleLeftBlinker(); postEvent("blinkers", { left: !leftBlinker, right: false }); }}
               title="Direccional izquierda (←)"
               aria-pressed={leftBlinker}
             >
@@ -318,7 +338,7 @@ export default function DrivePage() {
             </button>
             <button
               className={blinkerBtnClass(rightBlinker)}
-              onClick={toggleRightBlinker}
+              onClick={() => { toggleRightBlinker(); postEvent("blinkers", { left: false, right: !rightBlinker }); }}
               title="Direccional derecha (→)"
               aria-pressed={rightBlinker}
             >
@@ -332,13 +352,13 @@ export default function DrivePage() {
               id="rear-lights"
               label="Luces traseras"
               checked={rearLights}
-              onChange={setRearLights}
+              onChange={(v) => { setRearLights(v); /* evento lo manda el useEffect */ }}
             />
             <Switch
               id="front-lights"
               label="Luces delanteras"
               checked={frontLights}
-              onChange={setFrontLights}
+              onChange={(v) => { setFrontLights(v); }}
             />
           </div>
 
@@ -388,16 +408,16 @@ export default function DrivePage() {
               </button>
             </div>
             <div className="text-xs text-gray-500">
-              * Reemplaza este canvas por tu feed real; el botón descargará la captura actual.
+              * Este canvas dibuja los frames de <code>{STREAM_URL}/frame.jpg</code>; el botón descarga la captura actual.
             </div>
           </div>
 
-          {/* Estado de direcciones (ON/OFF) */}
+          {/* Estado de direcciones (ON/OFF) — con tus labels */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <Card label="Forward (W)" active={pressed.w} />
-            <Card label="Left (A)" active={pressed.a} />
-            <Card label="Backward (S)" active={pressed.s} />
-            <Card label="Right (D)" active={pressed.d} />
+            <Card label="Right (A)"   active={pressed.a} />
+            <Card label="Reverse (S)" active={pressed.s} />
+            <Card label="Left (D)"    active={pressed.d} />
           </div>
 
           {/* Sección de retroceso visible solo con S */}
@@ -439,9 +459,9 @@ export default function DrivePage() {
 
           {/* Info general + direccionales */}
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mt-6">
-            <Info label="Luces traseras" value={rearLights ? "ON" : "OFF"} highlight={rearLights} />
+            <Info label="Luces traseras"   value={rearLights ? "ON" : "OFF"} highlight={rearLights} />
             <Info label="Luces delanteras" value={frontLights ? "ON" : "OFF"} highlight={frontLights} />
-            <Info label="Velocidad" value={`${speed}`} />
+            <Info label="Velocidad"        value={`${speed}`} />
             <Info label="Direccional izq." value={leftBlinker ? "ON" : "OFF"} highlight={leftBlinker} />
             <Info label="Direccional der." value={rightBlinker ? "ON" : "OFF"} highlight={rightBlinker} />
           </div>

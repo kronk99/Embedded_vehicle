@@ -1,0 +1,27 @@
+entorno: 
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install Flask flask-cors
+
+para el primer flask: el de stream
+
+cd ~/Documents/empotrados/proy1/Embedded_vehicle
+source backend/.venv/bin/activate
+python backend/stream_server.py
+
+
+
+En otra terminal: 
+cd ~/Documents/empotrados/proy1/Embedded_vehicle/mi-web
+npm install   # solo la primera vez
+npm run dev
+
+
+en otra terminal (visual )
+cd ~/Documents/empotrados/proy1/Embedded_vehicle/mi-web
+npm install   # solo la primera vez
+npm run dev
+
+tiene que abrir http://localhost:3000
