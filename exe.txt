@@ -11,7 +11,9 @@ cd ~/Documents/empotrados/proy1/Embedded_vehicle
 source backend/.venv/bin/activate
 python backend/stream_server.py
 
-
+cd ~/Documents/empotrados/proy1/Embedded_vehicle
+source backend/.venv/bin/activate
+python backend/control_server.py
 
 En otra terminal: 
 cd ~/Documents/empotrados/proy1/Embedded_vehicle/mi-web

@@ -4,15 +4,14 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 
 type Pressed = {
-  w: boolean;
-  a: boolean;
+  w: boolean; // forward
+  a: boolean; // right (pulso 80ms)
   s: boolean; // reverse
-  d: boolean;
+  d: boolean; // left  (pulso 80ms)
 };
 
-// URLs de tus Flask
-const CONTROLS_URL = "http://localhost:5001"; // control_server.py
-const STREAM_URL = "http://localhost:5002";   // stream_server.py
+const CONTROLS_URL = "http://localhost:5001"; // Flask controles
+const STREAM_URL = "http://localhost:5002";   // Flask stream
 
 async function postEvent(topic: string, payload: any) {
   try {
@@ -28,7 +27,7 @@ async function postEvent(topic: string, payload: any) {
 }
 
 // Mapeo de dirección según tu definición:
-// A = derecha, W = frente, D = izquierda, S = reversa
+// W = forward, S = reverse, A = right, D = left
 function keyToDir(k: keyof Pressed) {
   switch (k) {
     case "w": return "forward";
@@ -39,46 +38,60 @@ function keyToDir(k: keyof Pressed) {
   }
 }
 
+// Velocidades permitidas
+const ALLOWED_SPEEDS = [0, 5, 30, 60, 90, 100] as const;
+
 export default function DrivePage() {
   const [username, setUsername] = useState<string>("");
   const [pressed, setPressed] = useState<Pressed>({ w: false, a: false, s: false, d: false });
 
-  // switches y slider
+  // switches y velocidad
   const [rearLights, setRearLights] = useState<boolean>(false);
   const [frontLights, setFrontLights] = useState<boolean>(false);
-  const [speed, setSpeed] = useState<number>(0); // 0..100, step 10
+  const [speed, setSpeed] = useState<number>(0); // limitado a ALLOWED_SPEEDS
 
-  // direccionales
+  // direccionales (exclusivos)
   const [leftBlinker, setLeftBlinker] = useState<boolean>(false);
   const [rightBlinker, setRightBlinker] = useState<boolean>(false);
 
   // canvas del stream
   const streamCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Distancia de retroceso (0..5) donde 5 = muy cerca del choque
+  // retroceso (0..5) 5 = muy cerca
   const [distanceLevel, setDistanceLevel] = useState<number>(0);
 
-  // Cargar usuario
+  // timers de pulso para A/D (evitar re-entradas)
+  const pulseTimers = useRef<{ a: number | null; d: number | null }>({ a: null, d: null });
+
   useEffect(() => {
     const u = typeof window !== "undefined" ? localStorage.getItem("username") : "";
     if (u) setUsername(u);
   }, []);
 
-  // === CAMBIO CLAVE: setKey ahora envía SOLO la tecla que cambió ===
+  // === Enviar solo la tecla que cambió ===
   const setKey = useCallback((key: keyof Pressed, val: boolean) => {
-    setPressed((p) => {
-      if (p[key] === val) return p;
-      return { ...p, [key]: val };
-    });
-    // Enviar solo el evento de esta tecla con tu mapeo de dirección
+    setPressed((p) => (p[key] === val ? p : { ...p, [key]: val }));
     postEvent("movement", { key, state: val ? "down" : "up", dir: keyToDir(key) });
   }, []);
 
-  // Handlers de direccionales (exclusivos)
+  // Pulso de 80ms para A/D
+  const pulseKey = useCallback((key: "a" | "d") => {
+    // evitar si ya hay un pulso activo
+    if (pulseTimers.current[key] !== null) return;
+    setKey(key, true); // down inmediato
+    const tid = window.setTimeout(() => {
+      setKey(key, false); // up a los 80ms
+      pulseTimers.current[key] = null;
+    }, 80);
+    pulseTimers.current[key] = tid as unknown as number;
+  }, [setKey]);
+
+  // Direccionales exclusivos
   const toggleLeftBlinker = useCallback(() => {
     setLeftBlinker((prev) => {
       const next = !prev;
       if (next) setRightBlinker(false);
+      postEvent("blinkers", { left: next, right: false });
       return next;
     });
   }, []);
@@ -86,61 +99,84 @@ export default function DrivePage() {
     setRightBlinker((prev) => {
       const next = !prev;
       if (next) setLeftBlinker(false);
+      postEvent("blinkers", { left: false, right: next });
       return next;
     });
   }, []);
 
-  // Teclado global: WASD + FLECHAS (← →)
+  // Teclado global:
+  // - WASD: W/S sostenidos; A/D = pulso 80ms
+  // - Direccionales con J (izq) y L (der)
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      const raw = e.key;
-      const k = raw.length === 1 ? raw.toLowerCase() : raw.toLowerCase();
+      const k = e.key.toLowerCase();
 
-      // Evita auto-repetición para toggles de direccionales
-      if (e.repeat && (k === "arrowleft" || k === "arrowright")) return;
+      // Direccionales con J/L (toggle exclusivo, sin autorepeat spam)
+      if ((k === "j" || k === "l") && e.repeat) return;
 
-      if (k === "arrowleft") {
+      if (k === "j") {
         e.preventDefault();
         toggleLeftBlinker();
-        // reporta estado actual de blinkers
-        postEvent("blinkers", { left: !leftBlinker, right: false });
         return;
       }
-      if (k === "arrowright") {
+      if (k === "l") {
         e.preventDefault();
         toggleRightBlinker();
-        postEvent("blinkers", { left: false, right: !rightBlinker });
         return;
       }
 
-      if (k === "w" || k === "a" || k === "s" || k === "d") {
+      // Movimiento
+      if (k === "w") {
         e.preventDefault();
-        setKey(k as keyof Pressed, true);
+        if (!pressed.w) setKey("w", true);
+        return;
+      }
+      if (k === "s") {
+        e.preventDefault();
+        if (!pressed.s) setKey("s", true);
+        return;
+      }
+      if (k === "a") {
+        e.preventDefault();
+        pulseKey("a"); // pulso 80ms
+        return;
+      }
+      if (k === "d") {
+        e.preventDefault();
+        pulseKey("d"); // pulso 80ms
+        return;
       }
     };
+
     const up = (e: KeyboardEvent) => {
-      const raw = e.key;
-      const k = raw.length === 1 ? raw.toLowerCase() : raw.toLowerCase();
-      // Flechas son toggle → no hacemos nada en keyup
-      if (k === "w" || k === "a" || k === "s" || k === "d") {
+      const k = e.key.toLowerCase();
+      if (k === "w" && pressed.w) {
         e.preventDefault();
-        setKey(k as keyof Pressed, false);
+        setKey("w", false);
+        return;
       }
+      if (k === "s" && pressed.s) {
+        e.preventDefault();
+        setKey("s", false);
+        return;
+      }
+      // A/D no hacen nada en keyup (ya son pulso)
     };
+
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     return () => {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
     };
-  }, [setKey, toggleLeftBlinker, toggleRightBlinker, leftBlinker, rightBlinker]);
+  }, [pressed.w, pressed.s, setKey, pulseKey, toggleLeftBlinker, toggleRightBlinker]);
 
-  // Auto luces traseras en reversa (S)
+  // Auto luces traseras con S
   useEffect(() => {
     setRearLights(pressed.s);
   }, [pressed.s]);
 
-  // Reportar cambios de luces / direccionales / velocidad (estos sí son independientes)
+  // Reportar cambios de luces / direccionales / velocidad
   useEffect(() => {
     postEvent("lights", { rear: rearLights, front: frontLights });
   }, [rearLights, frontLights]);
@@ -153,7 +189,7 @@ export default function DrivePage() {
     postEvent("speed", { value: speed });
   }, [speed]);
 
-  // === Dibujar frames del Flask de stream en el canvas ===
+  // Dibujar frames del stream
   useEffect(() => {
     let cancelled = false;
     const canvas = streamCanvasRef.current;
@@ -170,21 +206,15 @@ export default function DrivePage() {
           const img = new Image();
           img.crossOrigin = "anonymous";
           img.src = `${STREAM_URL}/frame.jpg?t=${Date.now()}`; // evita cache
-
           await new Promise<void>((resolve, reject) => {
             img.onload = () => resolve();
             img.onerror = reject;
           });
-
-          // Mantener aspect-ratio centrado
           ctx.clearRect(0, 0, W, H);
-          const iw = img.width;
-          const ih = img.height;
+          const iw = img.width, ih = img.height;
           const scale = Math.min(W / iw, H / ih);
-          const dw = iw * scale;
-          const dh = ih * scale;
-          const dx = (W - dw) / 2;
-          const dy = (H - dh) / 2;
+          const dw = iw * scale, dh = ih * scale;
+          const dx = (W - dw) / 2, dy = (H - dh) / 2;
           ctx.drawImage(img, dx, dy, dw, dh);
         } catch {
           await new Promise((r) => setTimeout(r, 200));
@@ -192,11 +222,8 @@ export default function DrivePage() {
         await new Promise((r) => setTimeout(r, 140)); // ~7 fps
       }
     };
-
     drawLoop();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
   // Captura foto del canvas
@@ -211,7 +238,7 @@ export default function DrivePage() {
     a.click();
   };
 
-  // Estilos
+  // UI helpers
   const btnClass = (active: boolean) =>
     `w-16 h-16 rounded-xl border text-lg font-bold grid place-items-center select-none 
      ${active ? "bg-black text-white border-black" : "bg-white text-black border-gray-300"} 
@@ -219,6 +246,11 @@ export default function DrivePage() {
 
   const blinkerBtnClass = (active: boolean) =>
     `w-12 h-12 rounded-lg border text-lg font-bold grid place-items-center select-none
+     ${active ? "bg-black text-white border-black" : "bg-white text-black border-gray-300"}
+     hover:border-black transition`;
+
+  const speedBtnClass = (active: boolean) =>
+    `px-3 py-1 rounded-lg border text-sm font-semibold select-none
      ${active ? "bg-black text-white border-black" : "bg-white text-black border-gray-300"}
      hover:border-black transition`;
 
@@ -256,24 +288,23 @@ export default function DrivePage() {
 
   return (
     <main className="min-h-screen bg-gray-50">
-      {/* Header fijo */}
+      {/* Header */}
       <div className="fixed top-4 left-4 z-10">
         <span className="text-xl font-extrabold tracking-wide">
           LETS DRIVE{username ? `, ${username}` : ""}
         </span>
       </div>
 
-      {/* Layout */}
       <div className="max-w-6xl mx-auto pt-20 px-6 grid grid-cols-1 md:grid-cols-[260px_1fr] gap-6">
         {/* Panel izquierdo */}
         <aside className="bg-white rounded-2xl shadow p-4 h-fit sticky top-20">
           <h2 className="text-base font-semibold mb-3">Controles</h2>
           <p className="text-sm text-gray-600 mb-3">
-            Usa el <b>mouse</b> manteniendo presionado o el <b>teclado</b> (W/A/S/D).{" "}
-            Direccionales: teclas <b>←</b> y <b>→</b>.
+            W = forward (sostenido) · S = reverse (sostenido) · A = right (pulso 80 ms) · D = left (pulso 80 ms) ·
+            Direccionales: <b>J</b> (izq) y <b>L</b> (der).
           </p>
 
-          {/* D-pad WASD */}
+          {/* D-pad WASD (A/D con pulso) */}
           <div className="grid grid-cols-3 gap-3 place-items-center mb-3">
             <div />
             <button
@@ -282,19 +313,17 @@ export default function DrivePage() {
               onMouseUp={() => setKey("w", false)}
               onMouseLeave={() => setKey("w", false)}
               aria-pressed={pressed.w}
-              title="W = forward"
+              title="W = forward (hold)"
             >
               W
             </button>
             <div />
 
             <button
-              className={btnClass(pressed.a)}
-              onMouseDown={() => setKey("a", true)}
-              onMouseUp={() => setKey("a", false)}
-              onMouseLeave={() => setKey("a", false)}
-              aria-pressed={pressed.a}
-              title="A = right"
+              className={btnClass(false /* pulso: no se queda activo */)}
+              onMouseDown={() => pulseKey("a")}
+              aria-pressed={false}
+              title="A = right (pulso 80ms)"
             >
               A
             </button>
@@ -302,12 +331,10 @@ export default function DrivePage() {
             <div className="w-16 h-16" />
 
             <button
-              className={btnClass(pressed.d)}
-              onMouseDown={() => setKey("d", true)}
-              onMouseUp={() => setKey("d", false)}
-              onMouseLeave={() => setKey("d", false)}
-              aria-pressed={pressed.d}
-              title="D = left"
+              className={btnClass(false /* pulso: no se queda activo */)}
+              onMouseDown={() => pulseKey("d")}
+              aria-pressed={false}
+              title="D = left (pulso 80ms)"
             >
               D
             </button>
@@ -319,27 +346,27 @@ export default function DrivePage() {
               onMouseUp={() => setKey("s", false)}
               onMouseLeave={() => setKey("s", false)}
               aria-pressed={pressed.s}
-              title="S = reverse"
+              title="S = reverse (hold)"
             >
               S
             </button>
             <div />
           </div>
 
-          {/* Direccionales ← → */}
+          {/* Direccionales (botones) */}
           <div className="flex items-center justify-center gap-4 mb-4">
             <button
               className={blinkerBtnClass(leftBlinker)}
-              onClick={() => { toggleLeftBlinker(); postEvent("blinkers", { left: !leftBlinker, right: false }); }}
-              title="Direccional izquierda (←)"
+              onClick={toggleLeftBlinker}
+              title="Direccional izquierda (tecla J)"
               aria-pressed={leftBlinker}
             >
               ←
             </button>
             <button
               className={blinkerBtnClass(rightBlinker)}
-              onClick={() => { toggleRightBlinker(); postEvent("blinkers", { left: false, right: !rightBlinker }); }}
-              title="Direccional derecha (→)"
+              onClick={toggleRightBlinker}
+              title="Direccional derecha (tecla L)"
               aria-pressed={rightBlinker}
             >
               →
@@ -352,42 +379,40 @@ export default function DrivePage() {
               id="rear-lights"
               label="Luces traseras"
               checked={rearLights}
-              onChange={(v) => { setRearLights(v); /* evento lo manda el useEffect */ }}
+              onChange={(v) => setRearLights(v)}
             />
             <Switch
               id="front-lights"
               label="Luces delanteras"
               checked={frontLights}
-              onChange={(v) => { setFrontLights(v); }}
+              onChange={(v) => setFrontLights(v)}
             />
           </div>
 
-          {/* Slider velocidad */}
+          {/* Velocidad: solo valores permitidos */}
           <div className="border-t pt-3 mt-3">
-            <label htmlFor="speed" className="block text-sm font-medium mb-2">
+            <div className="mb-2 text-sm font-medium">
               Velocidad: <span className="font-semibold">{speed}</span>
-            </label>
-            <input
-              id="speed"
-              type="range"
-              min={0}
-              max={100}
-              step={10}
-              value={speed}
-              onChange={(e) => setSpeed(Number(e.target.value))}
-              className="w-full"
-            />
-            <div className="flex justify-between text-xs text-gray-500 mt-1">
-              {[0,10,20,30,40,50,60,70,80,90,100].map(n => <span key={n}>{n}</span>)}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {ALLOWED_SPEEDS.map((v) => (
+                <button
+                  key={v}
+                  className={speedBtnClass(speed === v)}
+                  onClick={() => setSpeed(v)}
+                >
+                  {v}
+                </button>
+              ))}
             </div>
           </div>
         </aside>
 
-        {/* Contenido principal */}
+        {/* Panel principal */}
         <section className="bg-white rounded-2xl shadow p-6 min-h-[60vh]">
           <h2 className="text-2xl font-semibold mb-2">Panel de conducción</h2>
           <p className="text-gray-600 mb-4">
-            Aquí puedes integrar video en tiempo real, indicadores, telemetría, etc.
+            Stream simulado desde <code>{STREAM_URL}</code>, controles y estados abajo.
           </p>
 
           {/* STREAM + FOTO */}
@@ -408,52 +433,46 @@ export default function DrivePage() {
               </button>
             </div>
             <div className="text-xs text-gray-500">
-              * Este canvas dibuja los frames de <code>{STREAM_URL}/frame.jpg</code>; el botón descarga la captura actual.
+              * El botón descarga la captura actual del canvas.
             </div>
           </div>
 
-          {/* Estado de direcciones (ON/OFF) — con tus labels */}
+          {/* Estados de dirección (ON/OFF) */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <Card label="Forward (W)" active={pressed.w} />
-            <Card label="Right (A)"   active={pressed.a} />
+            <Card label="Right (A pulse)" active={false} />
             <Card label="Reverse (S)" active={pressed.s} />
-            <Card label="Left (D)"    active={pressed.d} />
+            <Card label="Left (D pulse)" active={false} />
           </div>
 
-          {/* Sección de retroceso visible solo con S */}
+          {/* Retroceso visible solo con S */}
           {pressed.s && (
             <div className="mt-4 p-4 rounded-xl border border-gray-200">
               <h3 className="text-lg font-semibold mb-2">Asistencia de retroceso</h3>
               <p className="text-sm text-gray-600 mb-3">
                 Representación de distancia a obstáculo: <b>5 = muy cerca (riesgo)</b>, 1 = lejos.
               </p>
-
               <div className="flex items-end gap-2 h-24">
-                {[1, 2, 3, 4, 5].map((lvl) => {
+                {[1,2,3,4,5].map((lvl) => {
                   const active = lvl <= distanceLevel;
                   const heights = { 1: "h-6", 2: "h-10", 3: "h-14", 4: "h-20", 5: "h-24" } as const;
                   return (
                     <div key={lvl} className="flex flex-col items-center">
                       <div
-                        className={`w-8 ${heights[lvl as 1 | 2 | 3 | 4 | 5]} rounded-md border ${
+                        className={`w-8 ${heights[lvl as 1|2|3|4|5]} rounded-md border ${
                           active ? "bg-red-600 border-red-700" : "bg-gray-200 border-gray-300"
                         }`}
                         title={`Nivel ${lvl}`}
                       />
-                      <span className="text-xs mt-1"> {lvl} </span>
+                      <span className="text-xs mt-1">{lvl}</span>
                     </div>
                   );
                 })}
               </div>
-
               <div className="mt-3 text-sm">
                 Nivel actual:{" "}
-                <b className={`${distanceLevel >= 4 ? "text-red-600" : "text-gray-900"}`}>
-                  {distanceLevel}
-                </b>
+                <b className={`${distanceLevel >= 4 ? "text-red-600" : "text-gray-900"}`}>{distanceLevel}</b>
               </div>
-
-              {/* TODO: setDistanceLevel(0..5) con dato real del ultrasonido */}
             </div>
           )}
 
@@ -474,9 +493,7 @@ export default function DrivePage() {
 function Card({ label, active }: { label: string; active: boolean }) {
   return (
     <div
-      className={`p-4 rounded-xl border ${
-        active ? "bg-black text-white border-black" : "bg-white border-gray-200"
-      }`}
+      className={`p-4 rounded-xl border ${active ? "bg-black text-white border-black" : "bg-white border-gray-200"}`}
     >
       <div className="text-sm opacity-70">Estado</div>
       <div className="text-lg font-semibold">{label}</div>
@@ -488,9 +505,7 @@ function Card({ label, active }: { label: string; active: boolean }) {
 function Info({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
   return (
     <div
-      className={`p-4 rounded-xl border ${
-        highlight ? "bg-black text-white border-black" : "bg-white border-gray-200"
-      }`}
+      className={`p-4 rounded-xl border ${highlight ? "bg-black text-white border-black" : "bg-white border-gray-200"}`}
     >
       <div className="text-sm opacity-70">{label}</div>
       <div className="text-xl font-semibold">{value}</div>
