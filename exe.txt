@@ -27,3 +27,20 @@ npm install   # solo la primera vez
 npm run dev
 
 tiene que abrir http://localhost:3000
+
+
+
+
+
+PRUEBAS FINALES
+
+
+source backend/.venv/bin/activate
+python backend/control_server.py
+
+
+source backend/.venv/bin/activate
+python backend/stream_server.py
+
+source backend/.venv/bin/activate
+python backend/ultrasonic_server.py
