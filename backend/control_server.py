@@ -10,7 +10,7 @@ app = Flask(__name__)
 # Permitir solo a tu frontend
 CORS(app, origins=["http://localhost:3000"], methods=["GET","POST","OPTIONS"], allow_headers=["Content-Type"])
 
-CAR_API_BASE = os.environ.get("CAR_API_BASE", "http://192.168.18.164:5000")  # Car API real
+CAR_API_BASE = os.environ.get("CAR_API_BASE", "http://192.168.200.200:5000")  # Car API real
 
 STEER_INVERT = True  # el hardware gira al revés: left->right y viceversa
 

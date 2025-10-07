@@ -7,10 +7,10 @@ app = Flask(__name__)
 CORS(app)
 
 # Endpoint directo de snapshot de tu cámara
-CAMERA_SNAPSHOT_URL = "http://192.168.18.164:5001/snapshot.jpg"
+CAMERA_SNAPSHOT_URL = "http://192.168.200.200:5001/snapshot.jpg"
 
 @app.get("/capture")
-def capture():
+def capture(): 
     """
     Descarga una imagen instantánea del stream remoto y la reenvía como JPEG.
     """

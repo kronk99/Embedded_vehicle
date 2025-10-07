@@ -3,7 +3,7 @@
 
 
 import { useEffect, useState, useCallback, useRef } from "react";
-
+import { useRouter } from "next/navigation"; // ⬅️ FALTA ESTE
 
 
 type Pressed = {
@@ -14,7 +14,7 @@ type Pressed = {
 };
 
 const API_BASE = "http://localhost:5001"; // <-- tu API
-const EXTERNAL_STREAM_SRC = "http://192.168.18.164:5001";
+const EXTERNAL_STREAM_SRC = "http://192.168.200.200:5001";
 const ULTRASONIC_URL = "http://localhost:5051/distance_level";
 
 async function apiPost(path: string, data: any = {}) {
@@ -22,7 +22,7 @@ async function apiPost(path: string, data: any = {}) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
-  });
+  }); 
   const text = await res.text();
   if (!res.ok) throw new Error(text || res.statusText);
   try {
@@ -112,6 +112,20 @@ export default function DrivePage() {
   },
   []
 );
+
+
+const router = useRouter();
+
+const handleLogout = useCallback(async () => {
+  try {
+    localStorage.removeItem("username");
+    localStorage.removeItem("token");
+    try { await fetch(`${API_BASE}/logout`, { method: "POST" }); } catch {}
+    router.push("/"); // regresa a app/page.tsx
+  } catch {
+    router.push("/");
+  }
+}, [router]);
 
   // Ultrasónico opcional
   useEffect(() => {
@@ -334,6 +348,9 @@ if (key === "d") {
     }
   }, [speed, moveDir]);
 
+
+  
+
   // ====== UI (no modificada en estilos) ======
   const btnClass = (active: boolean) =>
     `w-16 h-16 rounded-xl border text-lg font-bold grid place-items-center select-none
@@ -408,6 +425,24 @@ if (key === "d") {
             </button>
             <div />
           </div>
+
+{/* Esquina superior izquierda (ya lo tienes) */}
+<div className="fixed top-4 left-4 z-10">
+  <span className="text-xl font-extrabold tracking-wide">
+    LETS DRIVE{username ? `, ${username}` : ""}
+  </span>
+</div>
+
+{/* 👉 Nuevo: botón Salir arriba a la derecha */}
+<div className="fixed top-4 right-4 z-10">
+  <button
+    onClick={handleLogout}
+    className="px-4 py-2 rounded-lg border border-gray-300 bg-white hover:border-black text-sm font-semibold shadow-sm"
+    title="Cerrar sesión y volver al inicio"
+  >
+    Salir
+  </button>
+</div>
 
           {/* Direccionales */}
           <div className="flex items-center justify-center gap-4 mb-4">
