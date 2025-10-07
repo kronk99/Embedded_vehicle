@@ -4,6 +4,8 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 
+
+
 type Pressed = {
   w: boolean;
   a: boolean;
@@ -21,9 +23,16 @@ async function apiPost(path: string, data: any = {}) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  const text = await res.text();
+  if (!res.ok) throw new Error(text || res.statusText);
+  try {
+    return text ? JSON.parse(text) : { ok: true, status: res.status };
+  } catch {
+    return { ok: true, status: res.status, raw: text };
+  }
 }
+
+
 
 const ALLOWED_SPEEDS = [0, 5, 30, 60, 90, 100] as const;
 
@@ -81,15 +90,20 @@ export default function DrivePage() {
   }, []);
 
   const setSteer = useCallback(async (dir: "left" | "right", state: boolean) => {
-    // Invertir mapeo porque el hardware responde al revés
-    const hwDir = dir === "left" ? "right" : "left";
-    await apiPost(`/steer_state/${hwDir}`, { state });
+    // Ahora el backend invierte si hace falta; aquí se manda "left" o "right" literal
+    await apiPost(`/steer_state/${dir}`, { state });
   }, []);
 
-  const setLight = useCallback(async (name: string, state: boolean) => {
-    // Si tu backend usa otro path (p.ej. /light/{name}), cámbialo aquí:
-    await apiPost("/light", { name, state });
-  }, []);
+
+  const setLight = useCallback(
+    async (
+      name: "main_lights" | "left_signal" | "right_signal",
+      state: boolean
+    ) => {
+      await apiPost(`/light/${name}`, { state }); // body EXACTO {"state": bool}
+    },
+    []
+  );
 
   const steerState = useCallback(
   async (dir: "left" | "right", state: boolean) => {
@@ -187,6 +201,18 @@ if (key === "d") {
 }
   }, [pressed.s, pressed.w, pressed.a, pressed.d, startMove, stopMove, setSteer]);
 
+
+  const [autoBlinkers, setAutoBlinkers] = useState(true);
+
+  const toggleAutoBlinkers = useCallback(() => {
+    setAutoBlinkers((prev) => {
+      const next = !prev;
+      // no esperamos respuesta; fire-and-forget
+      apiPost("/lights/auto_blinkers", { enabled: next }).catch(() => {});
+      return next;
+    });
+  }, []);
+
   // Direccionales manuales
   const toggleLeftBlinker = useCallback(() => {
     setLeftBlinker((prev) => {
@@ -216,7 +242,7 @@ if (key === "d") {
   const toggleMainLights = useCallback(() => {
     setMainLights((prev) => {
       const next = !prev;
-      setLight("main", next);
+      setLight("main_lights", next); // nombre correcto del endpoint
       return next;
     });
   }, [setLight]);
@@ -392,6 +418,17 @@ if (key === "d") {
               →
             </button>
           </div>
+
+          <div className="flex items-center justify-between mt-2 mb-4">
+  <div className="text-sm font-medium">Direccionales automáticas</div>
+  <button
+    className={lightBtnClass(autoBlinkers)}
+    onClick={toggleAutoBlinkers}
+    title="Si está ON, se activan al girar (solo si no hay manuales encendidas)"
+  >
+    {autoBlinkers ? "Auto: ON" : "Auto: OFF"}
+  </button>
+</div>
 
           <div className="border-t pt-3 mt-1 space-y-2">
             <button className={lightBtnClass(mainLights)} onClick={toggleMainLights}>
