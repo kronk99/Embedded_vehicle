@@ -7,7 +7,7 @@ app = Flask(__name__)
 CORS(app)
 
 # Endpoint directo de snapshot de tu cámara
-CAMERA_SNAPSHOT_URL = "http://192.168.61.200:5001/snapshot.jpg"
+CAMERA_SNAPSHOT_URL = "http://192.168.18.164:5001/snapshot.jpg"
 
 @app.get("/capture")
 def capture():

@@ -8,7 +8,7 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 
-ULTRASONIC_API = "http://192.168.61.200:5050"
+ULTRASONIC_API = "http://192.168.18.164:5050"
 latest_data = {"front": {"distance": 0.0, "level": 0},
                "rear": {"distance": 0.0, "level": 0}}
 stop_thread = False

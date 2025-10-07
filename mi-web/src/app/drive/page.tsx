@@ -1,5 +1,7 @@
 "use client";
 
+
+
 import { useEffect, useState, useCallback, useRef } from "react";
 
 type Pressed = {
@@ -9,36 +11,30 @@ type Pressed = {
   d: boolean;
 };
 
-const CONTROLS_URL = "http://localhost:5001";
-const EXTERNAL_STREAM_SRC = "http://192.168.61.200:5001";
+const API_BASE = "http://localhost:5001"; // <-- tu API
+const EXTERNAL_STREAM_SRC = "http://192.168.18.164:5001";
 const ULTRASONIC_URL = "http://localhost:5051/distance_level";
 
-async function postEvent(topic: string, payload: any) {
-  try {
-    await fetch(`${CONTROLS_URL}/event`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic, payload }),
-      keepalive: true,
-    });
-  } catch {}
-}
-
-function keyToDir(k: keyof Pressed) {
-  switch (k) {
-    case "w": return "forward";
-    case "s": return "backward";
-    case "a": return "right";
-    case "d": return "left";
-    default: return "";
-  }
+async function apiPost(path: string, data: any = {}) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
 }
 
 const ALLOWED_SPEEDS = [0, 5, 30, 60, 90, 100] as const;
 
 export default function DrivePage() {
   const [username, setUsername] = useState("");
-  const [pressed, setPressed] = useState<Pressed>({ w: false, a: false, s: false, d: false });
+  const [pressed, setPressed] = useState<Pressed>({
+    w: false,
+    a: false,
+    s: false,
+    d: false,
+  });
   const [mainLights, setMainLights] = useState(false);
   const [speed, setSpeed] = useState(0);
   const [leftBlinker, setLeftBlinker] = useState(false);
@@ -48,8 +44,10 @@ export default function DrivePage() {
     rear: { distance: 0, level: 0 },
   });
 
+  // "forward" | "backward" | null
+  const [moveDir, setMoveDir] = useState<"forward" | "backward" | null>(null);
+
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const pulseTimers = useRef<{ a: number | null; d: number | null }>({ a: null, d: null });
 
   const playBeep = useCallback((distance: number) => {
     if (distance > 20) return;
@@ -67,18 +65,28 @@ export default function DrivePage() {
     osc.stop(ctx.currentTime + 0.1);
   }, []);
 
-  // 🔁 Mantener luces encendidas reenviando estado cada 0.5s
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (mainLights || leftBlinker || rightBlinker) {
-        postEvent("main_lights", { state: mainLights });
-        postEvent("blinkers", { left: leftBlinker, right: rightBlinker });
-      }
-    }, 800);
-    return () => clearInterval(interval);
-  }, [mainLights, leftBlinker, rightBlinker]);
+  // === ENDPOINTS CORRECTOS: /move/{direction} ===
+  const startMove = useCallback(
+    async (direction: "forward" | "backward") => {
+      setMoveDir(direction);
+      await apiPost(`/move/${direction}`, { speed }); // body debe ser { speed }
+    },
+    [speed]
+  );
 
-  // 🔊 Leer sensores ultrasónicos
+  const stopMove = useCallback(async () => {
+    // Detén el movimiento y evita re-envíos por cambios de velocidad
+    setMoveDir(null);
+    await apiPost("/move/forward", { speed: 0 }); // tu backend usa /move/{direction} y body {speed}
+  }, []);
+
+
+  const setLight = useCallback(async (name: string, state: boolean) => {
+    // Si tu backend usa otro path (p.ej. /light/{name}), cámbialo aquí:
+    await apiPost("/light", { name, state });
+  }, []);
+
+  // Ultrasónico opcional
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
@@ -100,141 +108,152 @@ export default function DrivePage() {
   }, [playBeep]);
 
   useEffect(() => {
-    const u = typeof window !== "undefined" ? localStorage.getItem("username") : "";
+    const u =
+      typeof window !== "undefined" ? localStorage.getItem("username") : "";
     if (u) setUsername(u);
   }, []);
 
-// === Manejo de teclas y sincronización con luces ===
-const setKey = useCallback(
-  (key: keyof Pressed, val: boolean) => {
-    setPressed((p) => (p[key] === val ? p : { ...p, [key]: val }));
+  // === Teclas: SOLO W/S mueven; A/D sin giro ===
+  const setKey = useCallback(
+    (key: keyof Pressed, val: boolean) => {
+        setPressed((p) => (p[key] === val ? p : { ...p, [key]: val }));
 
-    // Envía el evento de movimiento
-    postEvent("movement", { key, state: val ? "down" : "up", dir: keyToDir(key) });
+        if (key === "w") {
+          if (val) {
+            startMove("forward");
+          } else {
+            if (pressed.s) {
+              startMove("backward");
+            } else {
+              stopMove(); // 👉 solté W y no hay S: detén y deja de enviar
+            }
+          }
+        }
 
-    // 💡 Mantiene sincronizadas luces y direccionales cada vez
-    postEvent("main_lights", { state: mainLights });
-    postEvent("blinkers", { left: leftBlinker, right: rightBlinker });
-    postEvent("speed", { value: speed });
-  },
-  [mainLights, leftBlinker, rightBlinker, speed]
-);
+        if (key === "s") {
+          if (val) {
+            startMove("backward");
+          } else {
+            if (pressed.w) {
+              startMove("forward");
+            } else {
+              stopMove(); // 👉 solté S y no hay W: detén y deja de enviar
+            }
+          }
+        }
+        // A / D: sin acción
+      },
+      [pressed.s, pressed.w, startMove, stopMove]
+    );
 
-const toggleLeftBlinker = useCallback(() => { setLeftBlinker((prev) => { const next = !prev; if (next) setRightBlinker(false); postEvent("blinkers", { left: next, right: false }); return next; }); }, []); 
-const toggleRightBlinker = useCallback(() => { setRightBlinker((prev) => { const next = !prev; if (next) setLeftBlinker(false); postEvent("blinkers", { left: false, right: next }); return next; }); }, []);
+  // Direccionales manuales
+  const toggleLeftBlinker = useCallback(() => {
+    setLeftBlinker((prev) => {
+      const next = !prev;
+      if (next) {
+        setRightBlinker(false);
+        setLight("right_signal", false);
+      }
+      setLight("left_signal", next);
+      return next;
+    });
+  }, [setLight]);
 
+  const toggleRightBlinker = useCallback(() => {
+    setRightBlinker((prev) => {
+      const next = !prev;
+      if (next) {
+        setLeftBlinker(false);
+        setLight("left_signal", false);
+      }
+      setLight("right_signal", next);
+      return next;
+    });
+  }, [setLight]);
 
+  // Luces principales
+  const toggleMainLights = useCallback(() => {
+    setMainLights((prev) => {
+      const next = !prev;
+      setLight("main", next);
+      return next;
+    });
+  }, [setLight]);
 
-const pulseKey = useCallback(
-  (key: "a" | "d") => {
-    if (pulseTimers.current[key] !== null) return;
-    setKey(key, true);
-    const tid = window.setTimeout(() => {
-      setKey(key, false);
-      pulseTimers.current[key] = null;
-    }, 80);
-    pulseTimers.current[key] = tid as unknown as number;
-  },
-  [setKey]
-);
-
-useEffect(() => {
-  const down = (e: KeyboardEvent) => {
-    const k = e.key.toLowerCase();
-    if ((k === "j" || k === "l" || k === "t") && e.repeat) return;
-    if (k === "j") {
-      e.preventDefault();
-      toggleLeftBlinker();
-      return;
-    }
-    if (k === "l") {
-      e.preventDefault();
-      toggleRightBlinker();
-      return;
-    }
-    if (k === "t") {
-      e.preventDefault();
-      setMainLights((prev) => {
-        const next = !prev;
-        postEvent("main_lights", { state: next });
-        return next;
-      });
-      return;
-    }
-
-    // Movimiento (mantiene luces encendidas)
-    if (k === "w") {
-      e.preventDefault();
-      if (!pressed.w) setKey("w", true);
-      return;
-    }
-    if (k === "s") {
-      e.preventDefault();
-      if (!pressed.s) setKey("s", true);
-      return;
-    }
-    if (k === "a") {
-      e.preventDefault();
-      pulseKey("a");
-      return;
-    }
-    if (k === "d") {
-      e.preventDefault();
-      pulseKey("d");
-      return;
-    }
-  };
-
-  const up = (e: KeyboardEvent) => {
-    const k = e.key.toLowerCase();
-
-    // 🔁 Al soltar también reenviamos luces y direccionales
-    if (k === "w" && pressed.w) {
-      e.preventDefault();
-      setKey("w", false);
-      return;
-    }
-    if (k === "s" && pressed.s) {
-      e.preventDefault();
-      setKey("s", false);
-      return;
-    }
-    if (k === "a" || k === "d") {
-      // aunque sean pulsos, reenviamos luces
-      postEvent("main_lights", { state: mainLights });
-      postEvent("blinkers", { left: leftBlinker, right: rightBlinker });
-      postEvent("speed", { value: speed });
-    }
-  };
-
-  window.addEventListener("keydown", down);
-  window.addEventListener("keyup", up);
-  return () => {
-    window.removeEventListener("keydown", down);
-    window.removeEventListener("keyup", up);
-  };
-}, [pressed.w, pressed.s, setKey, pulseKey, toggleLeftBlinker, toggleRightBlinker, mainLights, leftBlinker, rightBlinker, speed]);
-
-
-
-  // Se mantiene el de velocidad (importante)
+  // Listeners de teclado
   useEffect(() => {
-    postEvent("speed", { value: speed });
-  }, [speed]);
+    const down = (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase();
+      if ((k === "j" || k === "l" || k === "t") && e.repeat) return;
 
-  // Opcional: mantener estos dos para respuesta inmediata (no son obligatorios)
+      if (k === "j") {
+        e.preventDefault();
+        toggleLeftBlinker();
+        return;
+      }
+      if (k === "l") {
+        e.preventDefault();
+        toggleRightBlinker();
+        return;
+      }
+      if (k === "t") {
+        e.preventDefault();
+        toggleMainLights();
+        return;
+      }
+
+      if (k === "w") {
+        e.preventDefault();
+        if (!pressed.w) setKey("w", true);
+        return;
+      }
+      if (k === "s") {
+        e.preventDefault();
+        if (!pressed.s) setKey("s", true);
+        return;
+      }
+
+      if (k === "a" || k === "d") {
+        e.preventDefault();
+        return; // sin giro
+      }
+    };
+
+    const up = (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase();
+
+      if (k === "w" && pressed.w) {
+        e.preventDefault();
+        setKey("w", false);
+        return;
+      }
+      if (k === "s" && pressed.s) {
+        e.preventDefault();
+        setKey("s", false);
+        return;
+      }
+    };
+
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+    };
+  }, [pressed.w, pressed.s, setKey, toggleLeftBlinker, toggleRightBlinker, toggleMainLights]);
+
+  // Si cambia la velocidad y seguimos en movimiento, reenviar al endpoint correcto
   useEffect(() => {
-    postEvent("main_lights", { state: mainLights });
-  }, [mainLights]);
+    if (moveDir) {
+      // ✅ siempre {speed} y URL con la dirección
+      apiPost(`/move/${moveDir}`, { speed });
+    }
+  }, [speed, moveDir]);
 
-  useEffect(() => {
-    postEvent("blinkers", { left: leftBlinker, right: rightBlinker });
-  }, [leftBlinker, rightBlinker]);
-
-
+  // ====== UI (no modificada en estilos) ======
   const btnClass = (active: boolean) =>
-    `w-16 h-16 rounded-xl border text-lg font-bold grid place-items-center select-none 
-     ${active ? "bg-black text-white border-black" : "bg-white text-black border-gray-300"} 
+    `w-16 h-16 rounded-xl border text-lg font-bold grid place-items-center select-none
+     ${active ? "bg-black text-white border-black" : "bg-white text-black border-gray-300"}
      hover:border-black transition`;
 
   const blinkerBtnClass = (active: boolean) =>
@@ -265,31 +284,50 @@ useEffect(() => {
         <aside className="bg-white rounded-2xl shadow p-4 h-fit sticky top-20">
           <h2 className="text-base font-semibold mb-3">Controles</h2>
           <p className="text-sm text-gray-600 mb-3">
-            W = forward (hold) · S = reverse (hold) · A = right (pulse 80 ms) · D = left (pulse 80 ms) ·
-            Direccionales: <b>J</b>/<b>L</b>. Luces (Main): <b>T</b> o botón.
+            W = forward (hold) · S = reverse (hold) · A/D sin giro · Direccionales: <b>J</b>/<b>L</b>. Luces: <b>T</b>.
           </p>
 
           {/* D-pad */}
           <div className="grid grid-cols-3 gap-3 place-items-center mb-3">
             <div />
-            <button className={btnClass(pressed.w)} onMouseDown={() => setKey("w", true)} onMouseUp={() => setKey("w", false)}>W</button>
+            <button
+              className={btnClass(pressed.w)}
+              onMouseDown={() => setKey("w", true)}
+              onMouseUp={() => setKey("w", false)}
+            >
+              W
+            </button>
             <div />
-            <button className={btnClass(false)} onMouseDown={() => pulseKey("a")}>A</button>
+            <button className={btnClass(false)} onMouseDown={() => { /* A sin acción */ }}>
+              A
+            </button>
             <div className="w-16 h-16" />
-            <button className={btnClass(false)} onMouseDown={() => pulseKey("d")}>D</button>
+            <button className={btnClass(false)} onMouseDown={() => { /* D sin acción */ }}>
+              D
+            </button>
             <div />
-            <button className={btnClass(pressed.s)} onMouseDown={() => setKey("s", true)} onMouseUp={() => setKey("s", false)}>S</button>
+            <button
+              className={btnClass(pressed.s)}
+              onMouseDown={() => setKey("s", true)}
+              onMouseUp={() => setKey("s", false)}
+            >
+              S
+            </button>
             <div />
           </div>
 
           {/* Direccionales */}
           <div className="flex items-center justify-center gap-4 mb-4">
-            <button className={blinkerBtnClass(leftBlinker)} onClick={toggleLeftBlinker}>←</button>
-            <button className={blinkerBtnClass(rightBlinker)} onClick={toggleRightBlinker}>→</button>
+            <button className={blinkerBtnClass(leftBlinker)} onClick={toggleLeftBlinker}>
+              ←
+            </button>
+            <button className={blinkerBtnClass(rightBlinker)} onClick={toggleRightBlinker}>
+              →
+            </button>
           </div>
 
           <div className="border-t pt-3 mt-1 space-y-2">
-            <button className={lightBtnClass(mainLights)} onClick={() => setMainLights((p) => { const n = !p; postEvent("main_lights", { state: n }); return n; })}>
+            <button className={lightBtnClass(mainLights)} onClick={toggleMainLights}>
               {mainLights ? "Main Lights: ON" : "Main Lights: OFF"}
             </button>
           </div>
@@ -301,7 +339,13 @@ useEffect(() => {
             </div>
             <div className="flex flex-wrap gap-2">
               {ALLOWED_SPEEDS.map((v) => (
-                <button key={v} className={speedBtnClass(speed === v)} onClick={() => setSpeed(v)}>{v}</button>
+                <button
+                  key={v}
+                  className={speedBtnClass(speed === v)}
+                  onClick={() => setSpeed(v)}
+                >
+                  {v}
+                </button>
               ))}
             </div>
           </div>
@@ -314,7 +358,6 @@ useEffect(() => {
             Stream embebido directamente desde <code>{EXTERNAL_STREAM_SRC}</code>.
           </p>
 
-          {/* STREAM + CAPTURA */}
           <div className="grid gap-3 mb-6">
             <div className="relative">
               <iframe
@@ -324,7 +367,6 @@ useEffect(() => {
                 title="Camera Stream"
               />
 
-              {/* Botón de captura */}
               <button
                 onClick={async () => {
                   try {
@@ -334,7 +376,9 @@ useEffect(() => {
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement("a");
                     a.href = url;
-                    a.download = `captura_${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`;
+                    a.download = `captura_${new Date()
+                      .toISOString()
+                      .replace(/[:.]/g, "-")}.jpg`;
                     a.click();
                     URL.revokeObjectURL(url);
                   } catch (err) {
@@ -349,12 +393,11 @@ useEffect(() => {
             </div>
 
             <div className="text-xs text-gray-500">
-              * Stream embebido desde {EXTERNAL_STREAM_SRC}. El botón descarga una captura actual a través del proxy Flask.
+              * Stream embebido desde {EXTERNAL_STREAM_SRC}. El botón descarga
+              una captura actual a través del proxy Flask.
             </div>
           </div>
 
-
-          {/* Estados */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-6">
             <Info label="Main Lights" value={mainLights ? "ON" : "OFF"} highlight={mainLights} />
             <Info label="Velocidad" value={`${speed}`} />
@@ -363,7 +406,6 @@ useEffect(() => {
             <Info label="Reverse (S)" value={pressed.s ? "ON" : "OFF"} highlight={pressed.s} />
           </div>
 
-          {/* Sensores ultrasónicos */}
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
             <SensorBar title="Sensor Frontal" data={ultra.front} />
             <SensorBar title="Sensor Trasero" data={ultra.rear} />
@@ -374,29 +416,56 @@ useEffect(() => {
   );
 }
 
-function Info({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
+function Info({
+  label,
+  value,
+  highlight = false,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+}) {
   return (
-    <div className={`p-4 rounded-2xl border ${highlight ? "bg-black text-white border-black" : "bg-white border-gray-200"}`}>
+    <div
+      className={`p-4 rounded-2xl border ${
+        highlight ? "bg-black text-white border-black" : "bg-white border-gray-200"
+      }`}
+    >
       <div className="text-sm opacity-70">{label}</div>
       <div className="text-xl font-semibold">{value}</div>
     </div>
   );
 }
 
-function SensorBar({ title, data }: { title: string; data: { distance: number; level: number } }) {
+function SensorBar({
+  title,
+  data,
+}: {
+  title: string;
+  data: { distance: number; level: number };
+}) {
   const colors = ["bg-green-500", "bg-lime-400", "bg-yellow-400", "bg-orange-500", "bg-red-600"];
   return (
     <div className="p-4 rounded-2xl border border-gray-200">
       <h3 className="text-lg font-semibold mb-2">{title}</h3>
       <div className="flex items-end gap-2 h-24">
-        {[1,2,3,4,5].map((lvl) => {
+        {[1, 2, 3, 4, 5].map((lvl) => {
           const active = lvl <= data.level;
-          const heights = { 1: "h-6", 2: "h-10", 3: "h-14", 4: "h-20", 5: "h-24" } as const;
+          const heights = {
+            1: "h-6",
+            2: "h-10",
+            3: "h-14",
+            4: "h-20",
+            5: "h-24",
+          } as const;
           return (
             <div key={lvl} className="flex flex-col items-center">
-              <div className={`w-8 ${heights[lvl as 1|2|3|4|5]} rounded-md border ${
-                active ? `${colors[lvl-1]} border-gray-400` : "bg-gray-200 border-gray-300"
-              }`} title={`Nivel ${lvl}`} />
+              <div
+                className={`w-8 ${heights[lvl as 1 | 2 | 3 | 4 | 5]} rounded-md border ${
+                  active ? `${colors[lvl - 1]} border-gray-400` : "bg-gray-200 border-gray-300"
+                }`}
+                title={`Nivel ${lvl}`}
+              />
               <span className="text-xs mt-1">{lvl}</span>
             </div>
           );
