@@ -45,6 +45,19 @@ def stop():
     # algunos firmwares exigen cuerpo; mandamos speed=0
     return jsonify(post_car("/stop", {"speed": 0}))
 
+
+@app.post("/steer_state/<direction>")
+def steer_state(direction):
+    direction = direction.lower()
+    if direction not in ("left", "right"):
+        return jsonify({"ok": False, "error": "invalid direction"}), 400
+
+    body = request.get_json(silent=True) or {}
+    state = bool(body.get("state", False))
+    # Proxy hacia la Car API real, exactamente como en tus capturas
+    return jsonify(post_car(f"/steer_state/{direction}", {"state": state}))
+
+
 if __name__ == "__main__":
     # corre en 5001 para no chocar con otros servicios
     app.run(host="0.0.0.0", port=5001, debug=True)

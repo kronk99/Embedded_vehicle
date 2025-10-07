@@ -80,11 +80,24 @@ export default function DrivePage() {
     await apiPost("/move/forward", { speed: 0 }); // tu backend usa /move/{direction} y body {speed}
   }, []);
 
+  const setSteer = useCallback(async (dir: "left" | "right", state: boolean) => {
+    // Invertir mapeo porque el hardware responde al revés
+    const hwDir = dir === "left" ? "right" : "left";
+    await apiPost(`/steer_state/${hwDir}`, { state });
+  }, []);
 
   const setLight = useCallback(async (name: string, state: boolean) => {
     // Si tu backend usa otro path (p.ej. /light/{name}), cámbialo aquí:
     await apiPost("/light", { name, state });
   }, []);
+
+  const steerState = useCallback(
+  async (dir: "left" | "right", state: boolean) => {
+    // Si tu backend usa otro path, cámbialo aquí.
+    await apiPost(`/steer_state/${dir}`, { state });
+  },
+  []
+);
 
   // Ultrasónico opcional
   useEffect(() => {
@@ -141,10 +154,38 @@ export default function DrivePage() {
             }
           }
         }
-        // A / D: sin acción
-      },
-      [pressed.s, pressed.w, startMove, stopMove]
-    );
+         // ===== Dirección A/D (steer hold) =====
+    // A / D: giro con hold
+if (key === "a") {
+  if (val) {
+    // Inicia giro a la izquierda
+    setSteer("left", true);
+    // Si estaba girando a la derecha, suéltalo
+    if (pressed.d) {
+      setPressed((p) => ({ ...p, d: false }));
+      setSteer("right", false);
+    }
+  } else {
+    // Suelta giro a la izquierda
+    setSteer("left", false);
+  }
+}
+
+if (key === "d") {
+  if (val) {
+    // Inicia giro a la derecha
+    setSteer("right", true);
+    // Si estaba girando a la izquierda, suéltalo
+    if (pressed.a) {
+      setPressed((p) => ({ ...p, a: false }));
+      setSteer("left", false);
+    }
+  } else {
+    // Suelta giro a la derecha
+    setSteer("right", false);
+  }
+}
+  }, [pressed.s, pressed.w, pressed.a, pressed.d, startMove, stopMove, setSteer]);
 
   // Direccionales manuales
   const toggleLeftBlinker = useCallback(() => {
@@ -213,9 +254,15 @@ export default function DrivePage() {
         return;
       }
 
-      if (k === "a" || k === "d") {
+      if (k === "a") {
         e.preventDefault();
-        return; // sin giro
+        if (!pressed.a) setKey("a", true);
+        return;
+      }
+      if (k === "d") {
+        e.preventDefault();
+        if (!pressed.d) setKey("d", true);
+        return;
       }
     };
 
@@ -232,6 +279,17 @@ export default function DrivePage() {
         setKey("s", false);
         return;
       }
+
+      if (k === "a" && pressed.a) {
+        e.preventDefault();
+        setKey("a", false);
+        return;
+      }
+      if (k === "d" && pressed.d) {
+        e.preventDefault();
+        setKey("d", false);
+        return;
+      }
     };
 
     window.addEventListener("keydown", down);
@@ -240,7 +298,7 @@ export default function DrivePage() {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
     };
-  }, [pressed.w, pressed.s, setKey, toggleLeftBlinker, toggleRightBlinker, toggleMainLights]);
+ }, [pressed.w, pressed.s, pressed.a, pressed.d, setKey, toggleLeftBlinker, toggleRightBlinker, toggleMainLights]);
 
   // Si cambia la velocidad y seguimos en movimiento, reenviar al endpoint correcto
   useEffect(() => {
@@ -298,13 +356,22 @@ export default function DrivePage() {
               W
             </button>
             <div />
-            <button className={btnClass(false)} onMouseDown={() => { /* A sin acción */ }}>
-              A
-            </button>
+            <button
+                className={btnClass(pressed.a)}
+                onMouseDown={() => setKey("a", true)}
+                onMouseUp={() => setKey("a", false)}
+              >
+                A
+              </button>
+
             <div className="w-16 h-16" />
-            <button className={btnClass(false)} onMouseDown={() => { /* D sin acción */ }}>
-              D
-            </button>
+            <button
+  className={btnClass(pressed.d)}
+  onMouseDown={() => setKey("d", true)}
+  onMouseUp={() => setKey("d", false)}
+>
+  D
+</button>
             <div />
             <button
               className={btnClass(pressed.s)}
