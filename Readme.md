@@ -5,7 +5,7 @@
 - Mariana Rojas Rojas  
 - Luis Alfredo González Sánchez  
 - Andres Molina Redondo
-- -Isaac Solis Sandí
+- Isaac Solis Sandí
 
 ---
 
@@ -110,13 +110,14 @@ git clone -b scarthgap git://git.yoctoproject.org/meta-raspberrypi
 ```
 ### ⚙️ Initialize Build Environment
 From the root of your Yocto project:
-```source oe-init-build-env build
+```bash
+source oe-init-build-env build
  ```
 This sets up the environment and moves you into the build/ directory.
 ###🏗 Build the Image
 Run bitbake to build the custom image:
 ```
-bitbake IMAGE_CONFIG
+bitbake core-image-base
 
 ```
 ###💾 Deploy to SD Card
@@ -227,6 +228,108 @@ From the web interface you can:
 <img width="766" height="366" alt="image" src="https://github.com/user-attachments/assets/7930a608-0af2-4fce-bc75-015d231c52dc" />
 <img width="337" height="269" alt="image" src="https://github.com/user-attachments/assets/4ac3c718-0b59-4324-af23-0e942f1b7447" />
 
+---
+# 📖 About This Project
+
+This project consists of the development of an **embedded system for controlling an intelligent vehicle** based on a Raspberry Pi, integrating software, hardware, and a web interface for real-time interaction.
+
+---
+
+## 🧩 Software Architecture
+
+- **Frontend (React Web App):**  
+  A browser-based graphical interface that allows the user to control the vehicle, view the live camera feed, and monitor sensors.  
+
+- **Backend (Flask APIs):**  
+  Three independent APIs (control, video streaming, and ultrasonic) manage communication between the frontend and the hardware.  
+
+- **Communication:**  
+  The system demonstrates a **very low response delay** between frontend and backend, providing almost immediate feedback to user actions.  
+
+- **Yocto Project:**  
+  Yocto was used to generate a custom Linux image, integrating all dependencies required for the system to function.
+
+![circuito](https://github.com/user-attachments/assets/d287e5e1-818f-4fba-b141-89579c47bc46)
+
+---
+
+## 🔌 Physical Circuit Integration
+
+- **Raspberry Pi 4 Model B** as the central processing unit.  
+- **Camera module** connected via CSI for real-time video streaming.  
+- **Ultrasonic sensors** for obstacle detection.  
+- **GPIOs** used for motor control and lighting system.  
+- **Lighting system** with two modes of operation:  
+  - **Automatic:** lights turn on based on environmental conditions.  
+  - **Manual:** direct control from the web interface.  
+  Both modes provide a **strong and visible level of illumination** for the vehicle.
+
+  ![arqui](https://github.com/user-attachments/assets/509855d0-3f5f-4ef6-bc2d-486ca355b45d)
+---
+## 🛠️ Materials Used
+
+## 🔋 Power System
+- **Powerbank Argom C12 (12000 mAh, 5 V 2.1 A output)**  
+  → Main power supply for the Raspberry Pi.  
+  → Portable and sufficient for extended sessions.  
+
+- **Additional battery pack (5x AA batteries)**  
+  → Powers the DC motors.  
+  → Prevents overloading the Raspberry Pi.  
+
+---
+
+## 💡 Lighting System
+- **Front LED lights (x2)**  
+  → Reused from the original car chassis.  
+  → Connected in parallel with current-limiting resistors.  
+
+- **Rear LED lights (x2)**  
+  → Also reused.  
+  → Powered by another GPIO pin, connected in parallel with resistors.  
+
+- **Directional LED lights (x4)**  
+  → Powered by a separate GPIO pin, connected in parallel with resistors.  
+
+- **330 Ω resistors (approx. x4)**  
+  → Limit current to the LEDs to prevent damage.  
+
+---
+
+## 📡 Sensors
+- **Ultrasonic sensor HC-SR04 (optional)**  
+  → Measures front distance to avoid collisions.  
+
+---
+
+## ⚙️ Motor Control
+- **H-Bridge Module TB6612FNG**  
+  → Controls the direction and speed of the DC motors using 3.3 V logic signals from the Raspberry Pi.  
+  → Necessary because the Raspberry Pi cannot directly supply enough current to drive the motors.  
+
+- **DC Motors (x2)**  
+  → Recycled from the original remote-controlled car.  
+  → Connected to outputs A and B of the H-Bridge module.  
+---
+## 📊 Results
+
+- **Low response delay:** communication between frontend and backend is almost immediate, ensuring smooth vehicle control.  
+- **Camera visualization:** high-quality video streaming with minimal delay, enabling precise navigation.  
+- **Lighting system:** reliable operation in both automatic and manual modes, with good visibility.  
+- **Energy optimization:** the system proved to be **efficient in power consumption**, extending the vehicle’s autonomy.  
+
+---
+
+## ⚠️ Challenges
+
+One of the main challenges was the **size of the Yocto image**, which increased significantly due to the dependencies required for **Picamera2** and related libraries. This affected the final image size but did not compromise system functionality.
+
+---
+
+## ✅ Conclusion
+Since **all planned features were successfully implemented** (control, camera, sensors, lighting, and real-time communication), the system is considered **complete and successful**.  
+Additionally, thanks to its optimized design, the system is **energy-efficient**, making it viable for practical embedded vehicle applications.
+---
 
 ## Final notes:
 
