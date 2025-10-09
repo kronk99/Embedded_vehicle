@@ -1,0 +1,11 @@
+[Unit]
+Description=Crear symlink libgpio.so
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/ln -sf /usr/lib/libgpio.so.1.0 /usr/lib/libgpio.so
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

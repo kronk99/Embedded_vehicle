@@ -1,0 +1,34 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          gpio-symlink
+# Required-Start:    $local_fs
+# Required-Stop:
+# Default-Start:     2 3 4 5
+# Default-Stop:
+# Short-Description: Ensure symlink for libgpio.so
+### END INIT INFO
+
+case "$1" in
+  start)
+    echo "Ensuring symlink for libgpio.so..."
+    if [ ! -L /usr/lib/libgpio.so ]; then
+        ln -sf /usr/lib/libgpio.so.1.0 /usr/lib/libgpio.so
+        echo "Symlink created."
+    else
+        echo "Symlink already exists."
+    fi
+    ;;
+  stop)
+    # nothing to do
+    ;;
+  restart)
+    $0 stop
+    $0 start
+    ;;
+  *)
+    echo "Usage: /etc/init.d/gpio-symlink {start|stop|restart}"
+    exit 1
+    ;;
+esac
+
+exit 0
